@@ -1,40 +1,39 @@
 close all
+clear all
 % set the folder of the .tif file here
-input = 'C:\Users\marie\Desktop\CP2\Code\Existing Code\Input';
+input = '';
 % set the filename of the .tif file inside the "input" folder here
-filename='as_p1.tif';   
+filename='';   
      
 % if desired set save_plots to true and specify the intended output folder
 save_plots = false;
-save_path = 'C:/Users/marie/Desktop/CP2/Results';
+save_path = '';
 
 % if desired set plot_ims to true (required to save the plots)
 plot_ims = true;
 
 cd(input)
-
-im=imread('as_p1.tif');  
-filename='as_p1.tif';   
 info=imfinfo(filename);     
 num_images=numel(info);  
-% set the ground truth here
-cell_divisions_gt=[0 4 7 2 3 6 2 7 4 1 2 4 19 16 15 8 14 8 18 7 11 2 2 12 14 11 7 11 10 9 3 10 10 3 4 13 8]'; %ground truth
 
-cell_divisions=0; % initialization of the cell_division counter
-cell_divisions_all = cell_divisions_gt;
-sensitivity = 0.94875; % determind by hyperparameter tuning
+% set the ground truth here
+cell_divisions_gt=[0 4 7 2 3 6 2 7 4 1 2 4 19 16 15 8 14 8 18 7 11 1 3 13 14 11 7 11 10 9 3 10 10 3 4 15 8]'; %ground truth
+
+sensitivity = 0.9465; % determind by hyperparameter tuning
 threshold1_factor = 2.1375; % determind by hyperparameter tuning
 threshold2_factor = 3.6; % determind by hyperparameter tuning
 delete_circle_threshold_1 = 20; % determind by hyperparameter tuning
 delete_circle_threshold_2 = 35; % determind by hyperparameter tuning
 find_circle_threshold_low = 6; % determind by hyperparameter tuning
-find_circle_threshold_high = 14; % determind by hyperparameter tuning
-threshold_is_cell_division = 66; % determind by hyperparameter tuning
+find_circle_threshold_high = 18; % determind by hyperparameter tuning
+threshold_is_cell_division = 74; % determind by hyperparameter tuning
+threshold_prev_cell_division = 15; % determind by hyperparameter tuning
 
 
 
 cell_divisions=0; % initialization of the cell_division counter
 cell_divisions_all = cell_divisions_gt;
+prev_cell_divisions_centers = [];
 
 for i=1:num_images
     im_BL=imread(filename,i,'Info',info);
@@ -59,6 +58,7 @@ for i=1:num_images
         % in order to increase the performance of the following
         % detection function
         diff(diff<=threshold1)=0; 
+        
         diff = imgaussfilt(diff); % preprocessing: Gauss filter
         diff = imdilate(diff,offsetstrel('ball',3,3)); % preprocessing: dilation filter
         diff = imerode(diff,offsetstrel('ball',3,3)); % preprocessing: erosion filter
@@ -67,7 +67,7 @@ for i=1:num_images
         diff = imerode(diff,offsetstrel('ball',3,3)); % preprocessing: erosion filter
 
         diff(diff<=threshold2)=0;
-           
+          
         % the folowing function finds circles in 2D data that are
         % brighter than the background
         [centers, radii]=imfindcircles(diff,[find_circle_threshold_low find_circle_threshold_high],'ObjectPolarity','bright','Sensitivity',sensitivity); %function that finds circels on the image
@@ -109,8 +109,26 @@ for i=1:num_images
             centers(indices)=NaN;
         end
         centers_org = centers;
-
+        
+        % the following loop checks if there were cell divisions on the
+        % same spots on the previous image and if so, deletes the circles
+        % from the centers list.
         if length(centers) > 0
+            if length(prev_cell_divisions_centers) > 0
+                for k=1:length(centers(:,1))
+                    if ~ isnan(centers(k,1))
+                        distances_prev = prev_cell_divisions_centers - centers(k,:);
+                        distances_sum_prev=abs(distances_prev(:,1))+abs(distances_prev(:,2));  
+                        indices = find(distances_sum<threshold_prev_cell_division);
+                        if min(distances_sum_prev) < threshold_prev_cell_division
+                            centers(k,:) = [-100 -100];                                           
+                        end
+                    end
+                end
+                indices = find(centers<0);
+                centers(indices)=NaN;
+            end
+
             % the following loop finds the closest adjecing circles
             % (=cells) for each circle and if there are two in close
             % proximity, they get identified as a cell division.
@@ -164,7 +182,6 @@ for i=1:num_images
         % plotting of the results
         if plot_ims
             r=20*ones(length(cell_divisions_centers),1);
-            figure_name=append('Image ', num2str(i-1),"->",num2str(i));
             figure_name=append('Image ',num2str(i));
             iptsetpref('ImshowBorder','tight'); %removal of figure border
             figure('Name',figure_name,'NumberTitle','off'); 
@@ -178,6 +195,7 @@ for i=1:num_images
     end
     % the image data is saved to allow the division on the next iteration
     im_BL_previous = im_BL;
+    prev_cell_divisions_centers = cell_divisions_centers;
 
     % saving the detected cell_divisions of the current image in a list
     if i == 1 
@@ -193,8 +211,6 @@ end
 % suming up the total number of cell divisions
 cell_divisions_all(end+1,1)=sum(cell_divisions_all(:,1));
 cell_divisions_all(end,2) = sum(cell_divisions_all(:,2));
-% performance computation
-performance = (sum(abs(cell_divisions_all(1:end-1,2) - cell_divisions_all(1:end-1,1))));
 
-
-    
+% error computation
+error = (sum(abs(cell_divisions_all(1:end-1,2) - cell_divisions_all(1:end-1,1))));
